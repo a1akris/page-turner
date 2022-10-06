@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+	"page-turner",
+	"page-turner-macros",
+]

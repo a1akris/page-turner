@@ -1,0 +1,22 @@
+[package]
+name = "page-turner"
+version = "0.5.2-dev"
+authors = ["Oleksandr Kryvytskyi <alkrivitskiy@pm.me>"]
+edition = "2021"
+autotests = false
+license = "MIT AND Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[test]]
+name = "tests"
+path = "./tests/main.rs"
+
+[dependencies]
+async-trait = "0.1.50"
+futures = "0.3.15"
+page-turner-macros = { path = "../page-turner-macros" }
+
+[dev-dependencies]
+trybuild = { version = "1.0", features=["diff"] }
+tokio = { version = "1", features = ["test-util", "macros", "rt"] }
