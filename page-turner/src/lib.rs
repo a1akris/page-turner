@@ -1,316 +1,213 @@
-//! A generic abstraction of paginated APIs.
-//!
-//! Imagine, you need to use the following API to find
-//! the most upvoted comment under a blog post.
-//!
-//! ```ignore
-//! struct GetCommentsRequest {
-//!     blog_post_id: BlogPostId,
-//!     page_number: u32,
-//! }
-//!
-//! struct GetCommentsResponse {
-//!     comments: Vec<Comment>,
-//!     more_comments_available: bool,
-//! }
-//! ```
-//!
-//! In order to do that you will need to write a hairy loop that checks the `more_comments_available`
-//! flag, increments `page_number`, and updates a variable that stores the resulting value.
-//! This crate helps to abstract away any sort of pagination and allows you to work with such
-//! APIs uniformly with the help of async streams.
-//!
-//! First, lets implement the [`PageQuery`] trait for our request. The purpose of this trait
-//! is to specify a type of the field that determines which page is queried and provide
-//! a setter for it. In our case we need to implement it for the `page_number` field of `GetCommentsRequest`.
-//!
-//! ```ignore
-//! impl PageQuery for GetCommentsRequest {
-//!     type PageKey = u32;
-//!
-//!     fn set_page_key(&mut self, page_number: Self::PageKey) {
-//!         self.page_number = page_number;
-//!     }
-//! }
-//! ```
-//!
-//! Next, we need to implement the [`PageTurner`] trait for the client that sends our `GetCommentsRequest`.
-//! The purpose of the [`PageTurner`] trait is to specify the queried item type, a query's error type,
-//! how to query a single page with provided `PageQuery`, and how to retrieve a key for the next page.
-//!
-//! ```ignore
-//! #[async_trait]
-//! impl PageTurner<GetCommentsRequest> for OurBlogClient {
-//!     type PageItem = Comment;
-//!     type PageError = OurClientError;
-//!
-//!     async fn turn_page(&self, request: GetCommentsRequest) -> PageTurnerOutput<Self, GetCommentsRequest> {
-//!         let current_page_number = request.page_number;
-//!
-//!         let response = self.get_comments(request).await?;
-//!         let next_page_number = response.more_comments_available.then(|| current_page_number + 1);
-//!
-//!         (response.comments, next_page_number)
-//!     }
-//! }
-//! ```
-//!
-//! With the [`PageTurner`] trait [`GetPagesStream`] and [`IntoPagesStream`] traits are auto-implemented
-//! and now we can use our client to find the most upvoted comment:
-//!
-//! ```ignore
-//! let client = OurBlogClient::new();
-//!
-//! let most_upvoted_comment = client
-//!     .page_items(GetCommentsRequest { blog_post_id, page_number: 1 })
-//!     .try_fold(None::<Comment>, |most_upvoted, next_comment| async move {
-//!         match most_upvoted {
-//!             Some(comment) if next_comment.upvotes > comment.upvotes => Ok(Some(next_comment)),
-//!             current @ Some(_) => Ok(current),
-//!             None => Ok(Some(next_comment)),
-//!         }
-//!     })
-//!     .await?;
-//!
-//! ```
-//!
-//! Or we can process the whole pages if needed
-//!
-//! ```ignore
-//! let comment_pages = client.pages(GetCommentsRequest { blog_post_id, page_number: 1 });
-//!
-//! while let Some(comment_page) = comment_pages.try_next().await? {
-//!     detect_spam(comment_page);
-//! }
-//! ```
-//!
-//! The [`PageQuery`] trait implementation is usually trivial, so you can simply derive it.
-//! `#[page_key]` attribute determines the [`PageQuery::PageKey`]. `T` and `Option<T>` types are supported.
-//!
-//! ```ignore
-//! #[derive(PageQuery, Clone)]
-//! struct GetCommentsRequest {
-//!     blog_post_id: BlogPostId,
-//!
-//!     #[page_key]
-//!     page_number: u32,
-//! }
-//! ```
+#![doc = include_str!("../README.md")]
+
+pub mod prelude;
 
 use async_trait::async_trait;
-use futures::{stream, Stream, TryStreamExt};
-pub use page_turner_macros::PageQuery;
-use std::{ops::Deref, pin::Pin};
+use futures::{
+    stream::{self, BoxStream},
+    Stream, StreamExt, TryStreamExt,
+};
 
-/// A handy shortcut that deduces the return type of [`PageTurner::turn_page`] for you.
-pub type PageTurnerOutput<P, Q> = TurnedPage<
-    <P as PageTurner<Q>>::PageItem,
-    <P as PageTurner<Q>>::PageError,
-    <Q as PageQuery>::PageKey,
->;
-
-/// An output of the [`PageTurner::turn_page`] method. The Ok part of `Result` consists of `Vec` of
-/// page items and an optional next page key. If the key is `None` then pagination is terminated.
-pub type TurnedPage<T, E, NextPageKey> = Result<(Vec<T>, Option<NextPageKey>), E>;
-
-/// A stream of page items returned by [`GetPagesStream::page_items`] and
-/// [`IntoPagesStream::into_page_items`] methods.
-pub type PageItemsStream<'a, T, E> = Pin<Box<dyn Stream<Item = Result<T, E>> + Send + 'a>>;
-
-/// A stream of pages returned by [`GetPagesStream::pages`] and [`IntoPagesStream::into_pages`]
-/// methods.
-pub type PagesStream<'a, T, E> = Pin<Box<dyn Stream<Item = Result<Vec<T>, E>> + Send + 'a>>;
-
-/// The trait for requests that support pagination. Requires to set a type of the field that
-/// determines which page is queried and requires to provide a setter for it.
-///
-/// There is a procedural macro `#[derive(PageQuery)]` that you can simply derive on a struct to
-/// implement this trait. Use `#[page_key]` to specify the page key field.
-pub trait PageQuery: Send + Sync + Clone + 'static {
-    type PageKey;
-
-    /// Implementation should simply update the page key
-    fn set_page_key(&mut self, next_key: Self::PageKey);
-}
-
-/// The trait that defines how to query a single page, the type of the page items and possible
-/// errors during the query execution. Should be implemented by the clients that send [`PageQuery`]
-/// requests. All types that implement this trait automatically implement [`GetPagesStream`] and
-/// [`IntoPagesStream`] traits that can be used to get streams of [`PageTurner::PageItem`].
+/// The trait is supposed to be implemented on API clients. The implementor needs to specify the
+/// [`PageTurner::PageItem`]s to return and [`PageTurner::PageError`]s that may occur. Then it must
+/// implement the [`PageTurner::turn_page`] method to describe how to query a single page and how
+/// to prepare a request to query the next page. After that default [`PageTurner::pages`] and
+/// [`PageTurner::into_pages`] methods will become available to provide a stream based querying
+/// API.
 #[async_trait]
-pub trait PageTurner<Q: PageQuery>: Send + Sync + 'static {
+pub trait PageTurner<R>: Send + Sync
+where
+    R: 'static + Send,
+{
     type PageItem: Send;
     type PageError: Send;
 
-    /// Returns `Result<(Vec<PageItem>, Option<NextPageKey>), PageError>`. `Option<NextPageKey> ==
-    /// None` signals to terminate the pagination. Beware that if you return the same page key that
-    /// you get in the `query` you can trigger an endless loop.
-    async fn turn_page(&self, query: Q) -> PageTurnerOutput<Self, Q>;
-}
+    /// Note: You need to return Ok([`TurnedPage`]) or an error. [`PageTurnerOutput`] is just a type
+    /// alias to save you from typing a somewhat complex return type.
+    async fn turn_page(&self, request: R) -> PageTurnerOutput<Self, R>;
 
-/// A trait that is auto-implemented for all types that implement the [`PageTurner`] trait.
-/// Its methods return streams that handle all pagination for you.
-pub trait GetPagesStream<Q> {
-    type PageItem: Send;
-    type PageError: Send;
+    /// Returns a borrowed [`PagesStream`] that cannot outlive `self`. This may dissappoint the
+    /// borrow checker in certain situations so you can use [`PageTurner::into_pages`] if you need an owned
+    /// stream.
+    fn pages(&self, request: R) -> PagesStream<'_, Self::PageItem, Self::PageError> {
+        stream::try_unfold(StreamState::NextPage { request }, move |state| {
+            request_next_page(self, state)
+        })
+        .boxed()
+        .into()
+    }
 
-    /// Returns the stream of page items. You can use [`futures::TryStreamExt`] combinators
-    /// on it. Beware that if you need only parital results you must limit this stream using
-    /// [`futures::StreamExt::take`] or [`futures::TryStreamExt::try_take_while`] or simillar
-    /// combinators. Otherwise all pages will be queried.
-    fn page_items(&self, query: Q) -> PageItemsStream<'_, Self::PageItem, Self::PageError>;
-
-    /// Returns the stream of pages. The page is a `Vec<Self::PageItem>`. This is useful when you
-    /// need to process data in chunks, count pages, etc...
-    fn pages(&self, query: Q) -> PagesStream<'_, Self::PageItem, Self::PageError>;
-}
-
-/// The same as [`GetPagesStream`] but consumes the client to return a stream bounded
-/// by the `'static` lifetime.  May be useful if you face some lifetime issues with
-/// [`GetPagesStream`]. However, this comes at a cost. The implementation clones the client
-/// with each [`PageTurner::turn_page`] call, so you need to ensure that cloning a client is possible
-/// and cheap. The best way to do that is to simply wrap the client into [`std::sync::Arc`].
-///
-/// ```text
-/// Arc::new(client).into_page_items(...)
-/// ```
-pub trait IntoPagesStream<Q> {
-    type PageItem: Send;
-    type PageError: Send;
-
-    /// The same stream as [`GetPagesStream::page_items`] but bounded by a `'static` lifetime
-    fn into_page_items(self, query: Q)
-        -> PageItemsStream<'static, Self::PageItem, Self::PageError>;
-
-    /// The same stream as [`GetPagesStream::pages`] but bounded by a `'static` lifetime
-    fn into_pages(self, query: Q) -> PagesStream<'static, Self::PageItem, Self::PageError>;
+    /// Returns an owned [`PagesStream`]. In certain situations you can't use borrowed streams. For
+    /// example, you can't use a borrowed stream if a stream should outlive a client in APIs like
+    /// this one:
+    ///
+    /// ```ignore
+    /// fn get_stuff(params: Params) -> impl Stream<Item = Stuff> {
+    ///     // This client is not needed anywhere else and is cheap to create.
+    ///     let client = StuffClient::new();
+    ///     client.pages(GetStuff::from_params(params))
+    /// }
+    /// ```
+    ///
+    /// The client gets dropped after the `.pages` call but the stream we're returning needs an
+    /// internal reference to the client in order to perform the querying. This situation can be
+    /// fixed by simply using this method instead:
+    ///
+    ///
+    /// ```ignore
+    /// fn get_stuff(params: Params) -> impl Stream<Item = Stuff> {
+    ///     let client = StuffClient::new(params);
+    ///     client.into_pages(GetStuff::from_params(params))
+    /// }
+    /// ```
+    ///
+    /// Now the client is consumed into a stream and is used internally. However, this comes at a
+    /// cost. The current implementation is based on the `FnMut` closure which clones the client
+    /// every time it requests a page. If your client is not cheaply clonable or not clonable at
+    /// all just wrap it into [`std::sync::Arc`] like that:
+    ///
+    /// ```ignore
+    /// fn get_stuff(params: Params) -> impl Stream<Item = Stuff> {
+    ///     let client = StuffClient::new(params);
+    ///     Arc::new(client).into_pages(GetStuff::from_params(params))
+    /// }
+    /// ```
+    fn into_pages(self, request: R) -> OwnedPagesStream<Self::PageItem, Self::PageError>
+    where
+        Self: 'static + Sized + Clone,
+    {
+        stream::try_unfold(StreamState::NextPage { request }, move |state| {
+            request_next_page(self.clone(), state)
+        })
+        .boxed()
+        .into()
+    }
 }
 
 #[async_trait]
-impl<D, P, Q> PageTurner<Q> for D
+impl<D, P, R> PageTurner<R> for D
 where
-    D: Deref<Target = P> + Send + Sync + 'static,
-    P: PageTurner<Q>,
-    Q: PageQuery,
+    D: Send + Sync + std::ops::Deref<Target = P>,
+    P: ?Sized + PageTurner<R>,
+    R: 'static + Send,
 {
     type PageItem = P::PageItem;
     type PageError = P::PageError;
 
-    async fn turn_page(&self, query: Q) -> PageTurnerOutput<Self, Q> {
-        self.deref().turn_page(query).await
+    async fn turn_page(&self, request: R) -> PageTurnerOutput<Self, R> {
+        self.deref().turn_page(request).await
     }
 }
 
-impl<P, Q> IntoPagesStream<Q> for P
-where
-    P: PageTurner<Q> + Clone,
-    Q: PageQuery,
-{
-    type PageItem = P::PageItem;
-    type PageError = P::PageError;
+/// A handy shortcut to deduce [`PageTurner::turn_page`] return type.
+pub type PageTurnerOutput<P, R> =
+    Result<TurnedPage<<P as PageTurner<R>>::PageItem, R>, <P as PageTurner<R>>::PageError>;
 
-    fn into_page_items(
-        self,
-        query: Q,
-    ) -> PageItemsStream<'static, Self::PageItem, Self::PageError> {
-        let stream = owned_base_stream(self, query)
+/// A struct that combines items queried for the current page and an optional request to query the
+/// next page. If `next_request` is `None` [`PageTurner`] stops querying pages.
+///
+/// [`TurnedPage::next`] and [`TurnedPage::last`] constructors can be used for convenience.
+pub struct TurnedPage<T, R> {
+    pub items: Vec<T>,
+    pub next_request: Option<R>,
+}
+
+impl<T, R> TurnedPage<T, R> {
+    pub fn new(items: Vec<T>, next_request: Option<R>) -> Self {
+        Self {
+            items,
+            next_request,
+        }
+    }
+
+    pub fn next(items: Vec<T>, next_request: R) -> Self {
+        Self {
+            items,
+            next_request: Some(next_request),
+        }
+    }
+
+    pub fn last(items: Vec<T>) -> Self {
+        Self {
+            items,
+            next_request: None,
+        }
+    }
+}
+
+/// A stream of `Result<Vec<PageTurner::PageItem>, PageTurner::PageError>`
+pub struct PagesStream<'a, T, E>(BoxStream<'a, Result<Vec<T>, E>>);
+pub type OwnedPagesStream<T, E> = PagesStream<'static, T, E>;
+
+impl<'a, T, E> PagesStream<'a, T, E>
+where
+    T: 'static + Send,
+    E: 'static + Send,
+{
+    /// Gets items of the page. This effectively performs pages flattening turning
+    /// `Result<Vec<T>, E>` into `Result<T, E>`. The `flatten()` name is not used
+    /// to not interfere with [`futures::StreamExt::flatten`] that you may want to call
+    /// on the resulting stream.
+    pub fn items(self) -> impl 'a + Send + Stream<Item = Result<T, E>> {
+        self.0
             .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-            .try_flatten();
-
-        Box::pin(stream)
-    }
-
-    fn into_pages(self, query: Q) -> PagesStream<'static, Self::PageItem, Self::PageError> {
-        Box::pin(owned_base_stream(self, query))
+            .try_flatten()
     }
 }
 
-impl<P, Q> GetPagesStream<Q> for P
-where
-    P: PageTurner<Q>,
-    Q: PageQuery,
-{
-    type PageItem = P::PageItem;
-    type PageError = P::PageError;
+impl<'a, T, E> Stream for PagesStream<'a, T, E> {
+    type Item = Result<Vec<T>, E>;
 
-    fn page_items(&self, query: Q) -> PageItemsStream<'_, Self::PageItem, Self::PageError> {
-        let stream = bounded_base_stream(self, query)
-            .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-            .try_flatten();
-
-        Box::pin(stream)
-    }
-
-    fn pages(&self, query: Q) -> PagesStream<'_, Self::PageItem, Self::PageError> {
-        Box::pin(bounded_base_stream(self, query))
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.poll_next_unpin(cx)
     }
 }
 
-enum StreamState<Q> {
-    NextPage { query: Q },
+impl<'a, T, E> From<BoxStream<'a, Result<Vec<T>, E>>> for PagesStream<'a, T, E> {
+    fn from(stream: BoxStream<'a, Result<Vec<T>, E>>) -> Self {
+        Self(stream)
+    }
+}
+
+enum StreamState<R> {
+    NextPage { request: R },
     End,
 }
 
-type Page<P, Q> = Result<Vec<<P as PageTurner<Q>>::PageItem>, <P as PageTurner<Q>>::PageError>;
-
-/// Construct a stream bounded by the 'page_turner lifetime
-fn bounded_base_stream<P, Q>(page_turner: &P, query: Q) -> impl Stream<Item = Page<P, Q>> + '_
+async fn request_next_page<P, R>(
+    page_turner: P,
+    state: StreamState<R>,
+) -> Result<
+    Option<(Vec<<P as PageTurner<R>>::PageItem>, StreamState<R>)>,
+    <P as PageTurner<R>>::PageError,
+>
 where
-    P: PageTurner<Q>,
-    Q: PageQuery,
+    P: PageTurner<R>,
+    R: 'static + Send,
 {
-    stream::try_unfold(StreamState::NextPage { query }, move |state| async move {
-        let mut query = match state {
-            StreamState::NextPage { query } => query,
-            StreamState::End => return Ok(None),
-        };
+    let request = match state {
+        StreamState::NextPage { request } => request,
+        StreamState::End => return Ok(None),
+    };
 
-        let (items, next_key) = page_turner.turn_page(query.clone()).await?;
+    let TurnedPage {
+        items,
+        next_request,
+    } = page_turner.turn_page(request).await?;
 
-        let next_state = match next_key {
-            Some(key) => {
-                query.set_page_key(key);
-                StreamState::NextPage { query }
-            }
-            None => StreamState::End,
-        };
+    let next_state = match next_request {
+        Some(request) => StreamState::NextPage { request },
+        None => StreamState::End,
+    };
 
-        Ok(Some((items, next_state)))
-    })
-}
-
-/// Construct a stream bounded by a 'static lifetime
-fn owned_base_stream<P, Q>(page_turner: P, query: Q) -> impl Stream<Item = Page<P, Q>> + 'static
-where
-    P: PageTurner<Q> + Clone,
-    Q: PageQuery,
-{
-    stream::try_unfold(StreamState::NextPage { query }, move |state| {
-        let page_turner = page_turner.clone();
-
-        async move {
-            let mut query = match state {
-                StreamState::NextPage { query } => query,
-                StreamState::End => return Ok(None),
-            };
-
-            let (items, next_key) = page_turner.turn_page(query.clone()).await?;
-
-            let next_state = match next_key {
-                Some(key) => {
-                    query.set_page_key(key);
-                    StreamState::NextPage { query }
-                }
-                None => StreamState::End,
-            };
-
-            Ok(Some((items, next_state)))
-        }
-    })
+    Ok(Some((items, next_state)))
 }
 
 // It's an artificial test to verify that paginated streams work as expected.
-// It's not how the PageTurner will be actually used in real code.
+// It's not a good example of how the PageTurner should be implemented for real use cases.
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -320,7 +217,6 @@ mod tests {
 
     use super::*;
 
-    #[derive(Copy, Clone)]
     struct GetNumbersQuery {
         key: usize,
     }
@@ -328,14 +224,6 @@ mod tests {
     impl GetNumbersQuery {
         fn new() -> Self {
             Self { key: 0 }
-        }
-    }
-
-    impl PageQuery for GetNumbersQuery {
-        type PageKey = usize;
-
-        fn set_page_key(&mut self, key: Self::PageKey) {
-            self.key = key;
         }
     }
 
@@ -367,28 +255,33 @@ mod tests {
         ) -> PageTurnerOutput<Self, GetNumbersQuery> {
             self.index.store(query.key, Ordering::Release);
 
-            let response: Vec<_> = self.numbers[self.index.load(Ordering::Acquire)..]
+            let index = self.index.load(Ordering::Acquire);
+            let response: Vec<_> = self.numbers[index..]
                 .iter()
                 .copied()
                 .take(self.page_size)
                 .collect();
 
-            let index = self.index.load(Ordering::Acquire);
-            let next_key =
-                (index + self.page_size < self.numbers.len()).then(|| index + self.page_size);
-
-            Ok((response, next_key))
+            if index + self.page_size < self.numbers.len() {
+                Ok(TurnedPage::next(
+                    response,
+                    GetNumbersQuery {
+                        key: index + self.page_size,
+                    },
+                ))
+            } else {
+                Ok(TurnedPage::last(response))
+            }
         }
     }
 
     #[tokio::test]
     async fn page_turner_smoke_test() {
-        // This line tests that auto impls for Arc<PageTurner>
-        // and IntoPagesStream<PageTurner + Clone> work
-        let client = Arc::new(NumbersClient::new(30, 30));
+        let client = NumbersClient::new(30, 30);
         let expected: Vec<usize> = (1..=30).collect();
 
-        let (output, _) = client.turn_page(GetNumbersQuery::new()).await.unwrap();
+        let TurnedPage { items: output, .. } =
+            client.turn_page(GetNumbersQuery::new()).await.unwrap();
         assert_eq!(output, expected, "Without stream");
 
         let pages: Vec<_> = client
@@ -400,8 +293,11 @@ mod tests {
 
         assert_eq!(pages[0].len(), 30, "The page must contain 30 items");
 
-        let output: Vec<_> = client
-            .into_page_items(GetNumbersQuery::new())
+        // Testing that `into_pages` stream will be available if we wrap a non-clonable client in
+        // Arc
+        let output: Vec<_> = Arc::new(client)
+            .into_pages(GetNumbersQuery::new())
+            .items()
             .try_collect()
             .await
             .unwrap();
@@ -426,7 +322,8 @@ mod tests {
         }
 
         let output: Vec<_> = client
-            .page_items(GetNumbersQuery::new())
+            .pages(GetNumbersQuery::new())
+            .items()
             .try_collect()
             .await
             .unwrap();
@@ -450,7 +347,8 @@ mod tests {
         assert_eq!(pages[1].len(), 11, "The second page must contain 11 items");
 
         let output: Vec<_> = client
-            .page_items(GetNumbersQuery::new())
+            .pages(GetNumbersQuery::new())
+            .items()
             .try_collect()
             .await
             .unwrap();
