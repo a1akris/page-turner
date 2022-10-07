@@ -12,8 +12,7 @@ use futures::{
 /// [`PageTurner::PageItem`]s to return and [`PageTurner::PageError`]s that may occur. Then it must
 /// implement the [`PageTurner::turn_page`] method to describe how to query a single page and how
 /// to prepare a request to query the next page. After that default [`PageTurner::pages`] and
-/// [`PageTurner::into_pages`] methods will become available to provide a stream based querying
-/// API.
+/// [`PageTurner::into_pages`] methods become available to provide a stream based querying API.
 #[async_trait]
 pub trait PageTurner<R>: Send + Sync
 where
