@@ -1,5 +1,22 @@
-[workspace]
+[package]
+name = "page-turner"
+version = "0.6.0"
+authors = ["a1akris <alkrivitskiy@pm.me>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
 
-members = [
-	"page-turner",
-]
+description = "A generic abstraction of APIs with pagination"
+readme = "README.md"
+repository = "https://github.com/a1akris/page-turner"
+documentation = "https://docs.rs/page-turner"
+keywords = ["pagination", "paginated", "pages", "page", "turner"]
+categories = ["rust-patterns", "asynchronous", "web-programming", "network-programming", "concurrency"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1.50"
+futures = "0.3.15"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros", "rt"] }
