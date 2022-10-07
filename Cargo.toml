@@ -12,6 +12,10 @@ documentation = "https://docs.rs/page-turner"
 keywords = ["pagination", "paginated", "pages", "page", "turner"]
 categories = ["rust-patterns", "asynchronous", "web-programming", "network-programming", "concurrency"]
 
+exclude = [
+    ".github/*"
+]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
