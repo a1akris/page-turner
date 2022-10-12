@@ -140,8 +140,8 @@ pub type OwnedPagesStream<T, E> = PagesStream<'static, T, E>;
 
 impl<'a, T, E> PagesStream<'a, T, E>
 where
-    T: 'static + Send,
-    E: 'static + Send,
+    T: 'a + Send,
+    E: 'a + Send,
 {
     /// Gets items of the page. This effectively performs pages flattening turning
     /// `Result<Vec<T>, E>` into `Result<T, E>`. The `flatten()` name is not used
