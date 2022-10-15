@@ -1,7 +1,7 @@
 //! Helpers to implement `pages` functionality
 use super::{PageTurner, TurnedPage};
 
-pub(crate) async fn request_next_page<P, R>(
+pub async fn request_next_page<P, R>(
     mut state: StreamState<P, R>,
 ) -> Result<
     Option<(Vec<<P as PageTurner<R>>::PageItem>, StreamState<P, R>)>,
@@ -25,13 +25,13 @@ where
     Ok(Some((items, state)))
 }
 
-pub(crate) struct StreamState<P, R> {
+pub struct StreamState<P, R> {
     page_turner: P,
     next_request: Option<R>,
 }
 
 impl<P, R> StreamState<P, R> {
-    pub(crate) fn new(page_turner: P, request: R) -> Self {
+    pub fn new(page_turner: P, request: R) -> Self {
         Self {
             page_turner,
             next_request: Some(request),
