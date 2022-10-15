@@ -335,6 +335,16 @@ assert_eq!(most_upvoted_comment.upvotes, 5);
 # }
 ```
 
+
+### Changelog
+
+- **0.8.1:** Bugfix in internal chunking iterator that yilded empty chunks for
+  `chunk_size = 1` in previous version. (0.8.0 yanked)
+- **0.8.0:** Introduce [`RequestAhead`] and [`PageTurner::pages_ahead`],
+  [`PageTurner::pages_ahead_unordered`] for concurrent page querying
+- **0.7.0:** Hotfix lifetime bounds in [`PagesStream::items()`] method.
+- **0.6.0:** Redesign, initial public release
+
 #### License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT
