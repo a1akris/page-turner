@@ -93,7 +93,7 @@ impl<'c, I: Iterator> Chunk<'c, I> {
         Self {
             chunks,
             first: Some(first),
-            yielded_count: 1,
+            yielded_count: 0,
         }
     }
 }
@@ -103,12 +103,11 @@ impl<'c, I: Iterator> Iterator for Chunk<'c, I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.yielded_count < self.chunks.chunk_size {
+            self.yielded_count += 1;
+
             match self.first.take() {
                 first @ Some(_) => first,
-                None => {
-                    self.yielded_count += 1;
-                    self.chunks.iter.next()
-                }
+                None => self.chunks.iter.next(),
             }
         } else {
             None
@@ -186,6 +185,19 @@ mod tests {
         }
 
         assert_eq!(chunks_count, 4);
+
+        let mut chunks = RequestIter::new(DumbRequest::default(), Limit::Pages(20)).chunks(1);
+        let mut chunks_count = 0;
+        while let Some(chunk) = chunks.next_chunk() {
+            let requests: Vec<_> = chunk.collect();
+
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests.last().unwrap().page - 1, chunks_count);
+
+            chunks_count += 1;
+        }
+
+        assert_eq!(chunks_count, 20);
 
         let mut chunks = RequestIter::new(DumbRequest::default(), Limit::None).chunks(0);
         assert!(chunks.next_chunk().is_none())
