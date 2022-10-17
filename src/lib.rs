@@ -167,10 +167,10 @@ where
     ///
     /// In the last chunk we receive the last 6th page before all other pages, then 2 "Not found"
     /// errors, and the valid 5th page comes last. That's why when we receive the last page or an
-    /// error we must let other futures in the chunk to complete. The current behavior
-    /// is to remember the last error till all futures in the chunk are ready, then if the end of
-    /// the stream was detected during the chunk processing we discard the error but otherwise we
-    /// we return it.
+    /// error we must let other futures in the chunk to complete. The current behavior is to
+    /// remember the last error till all futures in the chunk are ready, then if the end of the
+    /// stream was detected during the chunk processing we discard the error but otherwise we
+    /// return it.
     ///
     /// That's what the resulting stream yields for the example above.
     ///
