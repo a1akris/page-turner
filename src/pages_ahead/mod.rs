@@ -74,6 +74,10 @@ impl<I: Iterator> Chunks<I> {
             self.iter.next().map(|first| Chunk::new(self, first))
         }
     }
+
+    fn next_item(&mut self) -> Option<I::Item> {
+        self.iter.next()
+    }
 }
 
 impl<I> Chunks<I> {
@@ -95,6 +99,11 @@ impl<'c, I: Iterator> Chunk<'c, I> {
             first: Some(first),
             yielded_count: 0,
         }
+    }
+
+    /// How many items remain in a chunk
+    fn len(&self) -> usize {
+        self.chunks.chunk_size - self.yielded_count
     }
 }
 
@@ -150,6 +159,12 @@ mod tests {
             .last();
 
         assert_eq!(last.map(|req| req.page), Some(8));
+
+        let last = RequestIter::new(DumbRequest::default(), Limit::Pages(0))
+            .take(20)
+            .last();
+
+        assert_eq!(last.map(|req| req.page), None);
     }
 
     #[test]
