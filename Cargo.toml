@@ -1,15 +1,16 @@
 [package]
 name = "page-turner"
-version = "0.8.2"
+version = "1.0.0"
 authors = ["a1akris <alkrivitskiy@pm.me>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+rust-version = "1.75"
 
 description = "A generic abstraction of APIs with pagination"
 readme = "README.md"
 repository = "https://github.com/a1akris/page-turner"
 documentation = "https://docs.rs/page-turner"
-keywords = ["pagination", "paginated", "api", "pages", "page"]
+keywords = ["pagination", "paginated", "pageturner", "pages", "page-turner"]
 categories = ["rust-patterns", "asynchronous", "web-programming", "network-programming", "concurrency"]
 
 exclude = [
@@ -18,9 +19,20 @@ exclude = [
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["mt"]
+local = []
+mt = []
+mutable = ["local"]
+dynamic = ["mt", "async-trait"]
+
 [dependencies]
-async-trait = "0.1.57"
-futures = { version = "0.3.24", default_features = false, features = ["std"] }
+async-trait = { version = "0.1.77", optional = true }
+futures = { version = "0.3.30", default_features = false, features = ["std"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["test-util", "macros", "rt"] }
+tokio = { version = "1", features = ["test-util", "macros", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

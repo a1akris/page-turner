@@ -1,21 +1,16 @@
-//! Helpers to implement `pages_ahead` funtionality
-use super::{Limit, PageTurner, RequestAhead, TurnedPage};
+use crate::{Limit, RequestAhead};
 
-// TODO: The code in these submodules is copy-pasted a lot. Reorginize it to extract repetetive
-// parts or use macros to get rid of duplication.
-pub mod ordered;
-pub mod unordered;
+pub type RequestChunks<R> = Chunks<RequestIter<R>>;
+pub type EnumerableRequestChunks<R> = Chunks<std::iter::Enumerate<RequestIter<R>>>;
 
-type RequestChunks<R> = Chunks<RequestIter<R>>;
-
-struct RequestIter<R> {
+pub struct RequestIter<R> {
     cur_request: Option<R>,
     limit: Limit,
     counter: usize,
 }
 
 impl<R> RequestIter<R> {
-    fn new(req: R, limit: Limit) -> Self {
+    pub fn new(req: R, limit: Limit) -> Self {
         Self {
             cur_request: Some(req),
             limit,
@@ -51,7 +46,7 @@ where
     }
 }
 
-trait ChunksExt: Sized {
+pub trait ChunksExt: Sized {
     fn chunks(self, chunk_size: usize) -> Chunks<Self>;
 }
 
@@ -61,35 +56,39 @@ impl<I: Iterator + Sized> ChunksExt for I {
     }
 }
 
-struct Chunks<I> {
+pub struct Chunks<I> {
     iter: I,
     chunk_size: usize,
 }
 
+impl<I> Chunks<I> {
+    pub fn new(iter: I, chunk_size: usize) -> Self {
+        Self { iter, chunk_size }
+    }
+}
+
 impl<I: Iterator> Chunks<I> {
-    fn next_chunk(&mut self) -> Option<Chunk<'_, I>> {
+    pub fn next_chunk(&mut self) -> Option<Chunk<'_, I>> {
         if self.chunk_size == 0 {
             None
         } else {
             self.iter.next().map(|first| Chunk::new(self, first))
         }
     }
-}
 
-impl<I> Chunks<I> {
-    fn new(iter: I, chunk_size: usize) -> Self {
-        Self { iter, chunk_size }
+    pub fn next_item(&mut self) -> Option<I::Item> {
+        self.iter.next()
     }
 }
 
-struct Chunk<'c, I: Iterator> {
+pub struct Chunk<'c, I: Iterator> {
     chunks: &'c mut Chunks<I>,
     first: Option<I::Item>,
     yielded_count: usize,
 }
 
 impl<'c, I: Iterator> Chunk<'c, I> {
-    fn new(chunks: &'c mut Chunks<I>, first: I::Item) -> Self {
+    pub fn new(chunks: &'c mut Chunks<I>, first: I::Item) -> Self {
         Self {
             chunks,
             first: Some(first),
@@ -150,6 +149,12 @@ mod tests {
             .last();
 
         assert_eq!(last.map(|req| req.page), Some(8));
+
+        let last = RequestIter::new(DumbRequest::default(), Limit::Pages(0))
+            .take(20)
+            .last();
+
+        assert_eq!(last.map(|req| req.page), None);
     }
 
     #[test]

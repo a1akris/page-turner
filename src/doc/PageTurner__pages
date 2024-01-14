@@ -1,0 +1,4 @@
+Returns a stream that queries pages one by one. The stream borrows the client
+internally and this may dissappoint the borrow checker in certain
+situations so you can use [`PageTurner::into_pages`] if you need an owned
+stream.

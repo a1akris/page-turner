@@ -1,0 +1,9 @@
+The trait is supposed to be implemented on API clients.
+You need to specify the [`PageTurner::PageItems`]s to
+return and [`PageTurner::PageError`]s that may occur for
+a particular request. Then you should implement the
+[`PageTurner::turn_page`] method to describe how to
+query a single page and how to prepare a request for the
+next page. After that default [`PageTurner::pages`] and
+[`PageTurner::into_pages`] methods become available to
+provide a stream based querying API.
