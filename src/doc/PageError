@@ -1,0 +1,1 @@
+A type alias helpful to resolve [`PageTurner::PageError`] in generic contexts

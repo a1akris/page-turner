@@ -1,0 +1,1 @@
+A type alias that names the [`PageTurner::turn_page`] future if it needs to be stored somewhere. As of Rust 1.75 we must use a dyn object to store `impl Future` futures.

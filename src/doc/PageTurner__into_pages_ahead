@@ -1,0 +1,1 @@
+This method exists for the same reason described in [`PageTurner::into_pages`]. See [`PageTurner::pages_ahead`] for the description.

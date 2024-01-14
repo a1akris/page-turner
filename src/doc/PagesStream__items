@@ -1,0 +1,2 @@
+Allows to iterate over individual page items instead of whole pages if
+`PageItems` is a container type(yields `String` if `PageItems = Vec<String>`).

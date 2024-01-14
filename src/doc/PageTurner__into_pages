@@ -1,0 +1,28 @@
+Returns an owned [`PagesStream`].
+
+In certain situations you can't use streams with borrows. For example, you
+can't use a stream with a borrow if a stream should outlive a client in APIs
+like this one:
+
+ ```ignore
+fn get_stuff(params: Params) -> impl Stream<Item = Stuff> {
+    // This client is not needed anywhere else and is cheap to create.
+    let client = StuffClient::new();
+    client.pages(GetStuff::from_params(params))
+}
+```
+
+The client gets dropped after the `.pages` call but the stream we're
+returning needs an internal reference to the client in order to perform
+the querying. This situation can be fixed by simply using `into_pages` variant
+instead:
+
+
+```ignore
+fn get_stuff(params: Params) -> impl Stream<Item = Stuff> {
+    let client = StuffClient::new(params);
+    client.into_pages(GetStuff::from_params(params))
+}
+```
+
+Now the client is consumed into the stream to be used internally.

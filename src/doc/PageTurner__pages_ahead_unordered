@@ -1,0 +1,72 @@
+Behaves like [`PageTurner::pages_ahead`] with the difference that pages are
+returned as soon as they become available in an arbitrary order. This has an
+important consequence though, this method postpones returning an error until
+all `request_pages_ahead` requests in a chunk are completed, and it awaits for
+all scheduled requests to complete after it finds the last existing page too,
+therefore, it's recommended to pick small `request_pages_ahead` amounts to make
+the method behave optimally.
+
+Be careful using `take` and similar stream combinators on this stream as its
+unordered nature will cause inconsistent results. Prefer [`Limit::Pages`]
+instead.
+
+# Errors
+
+If errors appear past the last existing page they're being discarded.
+Otherwise, the error for the first(in the requests generation order) failed
+page is being returned and the stream ends after it.
+
+# Detailed explanation
+
+Unlike [`PageTurner::pages_ahead`] this method will return all successful
+responses in a chunk even after some error has occured. It is also guaranteed
+that if multiple errors have occured only the one for the earliest issued request
+will be returned no mater the actual request completion order.
+
+Successful case example:
+
+```text
+Pages on resource:    [1,2,3,4]
+Initial Requests for requests_ahead_count = 3: [[1,2,3]]
+
+Got response for 2nd page: [2+,[1,3,4]]
+Got response for 3rd page: [2+, 3+, [1,4,5]]
+Got error for 5th page:    [2+, 3+, [1,4]], postponed(5)
+Got response for 4st page: [2+, 3+, 4+, [1] | 5* ]
+Got response for 1st page: [2+, 3+, 4+, 1+]
+
+
+Resulting stream: [2, 3, 4, 1]
+```
+
+In the example above when the first error occurs we stop scheduling new futures
+and wait for the already scheduled ones `[1, 4]` to complete postponing the
+error of the 5th page for later. Then we receive `4` and detect that it is the
+last page, therefore, the error for the 5th page is being discarded. After
+we've found the last page we simply wait until all scheduled futures are
+resolved and there is only a single one `[1]` that ends the stream upon
+completion.
+
+Error case example:
+
+```text
+Pages on resource:    [1,2,3,4]
+Initial Requests for requests_ahead_count = 4: [[1,2,3,4]]
+
+Got response for 2nd page: [2+,[1,3,4,5]]
+Got error for 3rd page:    [2+, 3+, [1,4,5]], postponed(3),
+Got error for 5th page:    [2+, 3+, [1,4]], postponed(3), discarded(5)
+Got error for 1st page:    [2+, 3+, [4])], postponed(1), discarded(3)
+Got response for 4st page: [2+, 3+, 4+, Err(1) | ]
+
+
+Resulting stream: [2, 3, 4, Err(1)]
+```
+
+In the example above when we receive an error for the 5th page we discard it
+immediately as we already have an error for the earlier 3rd request, then when
+the 1st request results in an error we replace the error of the 3rd page with
+it as the 1st request comes before. At the last step we receive the 4th page
+and detect that it is the last existing page, there are no more futures left in
+a chunk, and the error we have comes before the last existing page, therefore we
+include the error at the end of the stream.

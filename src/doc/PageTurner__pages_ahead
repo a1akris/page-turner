@@ -1,0 +1,35 @@
+Executes a chunk of `requests_ahead_count` requests concurrently to query
+multiple pages at once. Returns pages in the requests order(first page
+corresponds to the first request and so on). Because of that the stream will be
+blocked until the first page becomes available even if the second page is
+already received. Use [`PageTurner::pages_ahead_unordered`] if the order is not
+important to unblock the stream as soon as any page arrives.
+
+The implementation uses a sliding window scheduling meaning that as soon as you receive the first page a request for the next page is being sent. Because of that there are always some redundant requests that query non-existing pages past the last existing page. Example:
+
+```text
+Pages on resource: [1,2,3]
+Initial Requests for requests_ahead_count = 2: [[1,2]]
+
+Requests after receiving 1st page: [1+,[2,3]]
+Requests after receiving 2nd page: [1+,2+,[3,4]]
+Requests after receiving 3rd page: [1+,2+,3+ | [4*,5*]]
+```
+
+The stream ends after we received the 3rd page, however, requests `4` and `5` were scheduled in the process and were executing concurrently despite being canceled at the end. To avoid scheduling such redundant requests specify [`Limit::Pages`] when you know exactly how many pages you need to query.
+
+To discover the end of the stream [`TurnedPage::next_request`] is being checked
+for the availability of the next request but the actual `next_request` is
+always taken from [`RequestAhead::next_request`] thus it's possible to get
+different results when using [`PageTurner::pages`] vs
+[`PageTurner::pages_ahead`] streams if you construct next requests in
+[`RequestAhead::next_request`] and in [`PageTurner::turn_page`]
+differently. This is considered to be a logical bug, by the contract
+streams must be identical and it's up to you to ensure that.
+
+# Errors
+
+If errors appear past the last existing page they're being discarded.
+Otherwise, the error for the first failed page is being returned and the stream
+ends after it.
+
